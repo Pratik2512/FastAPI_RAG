@@ -27,6 +27,9 @@ class RAGQuery(BaseModel):
     k: int = 3
     model: str = "qwen2.5:3b"
 
+class DeleteData(BaseModel):
+    id: str
+
 # Global storage
 index = None
 metadata = []
@@ -202,4 +205,54 @@ Provide a clear explanation and include relevant code if applicable.
         "query": data.query,
         "context_used": contexts,
         "answer": response["response"]
+    }
+
+
+@app.delete("/delete")
+def delete_item(data: DeleteData):
+
+    global index, metadata
+
+    if len(metadata) == 0:
+        raise HTTPException(status_code=400, detail="Database empty")
+
+    # Find index of item to delete
+    delete_idx = None
+    for i, item in enumerate(metadata):
+        if item["id"] == data.id:
+            delete_idx = i
+            break
+
+    if delete_idx is None:
+        raise HTTPException(status_code=404, detail="ID not found")
+
+    # Remove from metadata
+    metadata.pop(delete_idx)
+
+    # Rebuild FAISS index
+    index = None
+
+    if len(metadata) > 0:
+        vectors = []
+
+        for item in metadata:
+            emb = ollama.embeddings(
+                model="nomic-embed-text",
+                prompt=item["text"]
+            )["embedding"]
+
+            vectors.append(emb)
+
+        vectors = np.array(vectors).astype("float32")
+
+        index = faiss.IndexFlatL2(len(vectors[0]))
+        index.add(vectors)
+
+    # Save updated DB
+    save_db()
+
+    return {
+        "status": "deleted",
+        "id": data.id,
+        "remaining_items": len(metadata)
     }
