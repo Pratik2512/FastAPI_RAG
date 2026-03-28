@@ -16,7 +16,9 @@ META_FILE = "metadata.json"
 # Request schemas
 class TextData(BaseModel):
     id: str
-    text: str
+    xsjs: str
+    nodejs: str
+    description: str
 
 class QueryData(BaseModel):
     query: str
@@ -77,26 +79,41 @@ def add_text(data: TextData):
 
     global index, metadata
 
-    # Create embedding
+    # 🔹 Combine fields into one embedding text
+    combined_text = f"""
+    XSJS Code:
+    {data.xsjs}
+
+    Node.js Code:
+    {data.nodejs}
+
+    Description:
+    {data.description}
+    """
+
+    # 🔹 Create embedding
     try:
         emb = ollama.embeddings(
             model="nomic-embed-text",
-            prompt=data.text
+            prompt=combined_text
         )["embedding"]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
     vector = np.array(emb).astype("float32")
 
-    # Initialize FAISS if needed
+    # 🔹 Initialize FAISS index if needed
     if index is None:
         index = faiss.IndexFlatL2(len(vector))
 
     index.add(np.array([vector]))
 
+    # 🔹 Store structured metadata (important for RAG retrieval)
     metadata.append({
         "id": data.id,
-        "text": data.text
+        "xsjs": data.xsjs,
+        "nodejs": data.nodejs,
+        "description": data.description
     })
 
     save_db()
@@ -162,7 +179,7 @@ def ask_llm(data: RAGQuery):
     if index is None or len(metadata) == 0:
         raise HTTPException(status_code=400, detail="Vector database empty")
 
-    # Create embedding for query
+    # 🔹 Create embedding for XSJS query
     emb = ollama.embeddings(
         model="nomic-embed-text",
         prompt=data.query
@@ -170,32 +187,57 @@ def ask_llm(data: RAGQuery):
 
     query_vector = np.array([emb]).astype("float32")
 
-    # Search FAISS
+    # 🔹 Search FAISS
     D, I = index.search(query_vector, data.k)
 
     contexts = []
     for idx in I[0]:
-        contexts.append(metadata[idx]["text"])
+        # 🔹 Skip invalid indices
+        if idx == -1 or idx >= len(metadata):
+            continue
 
-    # Combine context
-    context_text = "\n\n".join(contexts)
+        item = metadata[idx]
 
-    # Build prompt
+        # 🔹 Format structured context for better grounding
+        formatted = f"""
+XSJS:
+{item['xsjs']}
+
+Node.js:
+{item['nodejs']}
+
+Description:
+{item['description']}
+"""
+        contexts.append(formatted)
+
+    # 🔹 Combine context
+    context_text = "\n\n---\n\n".join(contexts)
+
+    # 🔹 Stronger prompt for code conversion
     prompt = f"""
-You are a helpful coding assistant.
+You are an expert SAP XSJS to Node.js (CAP) migration assistant.
 
-Use the provided context to answer the question.
+Your task is to convert XSJS code into modern async Node.js code using cds.run.
 
-Context:
+Guidelines:
+- Use async/await
+- Replace prepareStatement / prepareCall with cds.run
+- Preserve logic and parameters
+- Return clean, production-ready code
+- Do NOT explain unless asked
+- Output only Node.js code
+
+Reference Examples:
 {context_text}
 
-Question:
+XSJS Input:
 {data.query}
 
-Provide a clear explanation and include relevant code if applicable.
+Convert the above XSJS code into Node.js async function.
 """
 
-    # Generate response using LLM
+    # 🔹 Generate response
     response = ollama.generate(
         model=data.model,
         prompt=prompt
@@ -203,7 +245,7 @@ Provide a clear explanation and include relevant code if applicable.
 
     return {
         "query": data.query,
-        "context_used": contexts,
+        "matched_examples": contexts,
         "answer": response["response"]
     }
 
