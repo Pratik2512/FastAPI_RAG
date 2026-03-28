@@ -13,6 +13,9 @@ app = FastAPI(title="Persistent Vector DB API")
 INDEX_FILE = "faiss_index.bin"
 META_FILE = "metadata.json"
 
+EMB_MODEL = "nomic-embed-text"
+LLM = "qwen2.5:3b"     
+
 # Request schemas
 class TextData(BaseModel):
     id: str
@@ -94,7 +97,7 @@ def add_text(data: TextData):
     # 🔹 Create embedding
     try:
         emb = ollama.embeddings(
-            model="nomic-embed-text",
+            model=EMB_MODEL,
             prompt=combined_text
         )["embedding"]
     except Exception as e:
@@ -136,7 +139,7 @@ def search(data: QueryData):
         raise HTTPException(status_code=400, detail="Database empty")
 
     emb = ollama.embeddings(
-        model="nomic-embed-text",
+        model=EMB_MODEL,
         prompt=data.query
     )["embedding"]
 
@@ -181,7 +184,7 @@ def ask_llm(data: RAGQuery):
 
     # 🔹 Create embedding for XSJS query
     emb = ollama.embeddings(
-        model="nomic-embed-text",
+        model=EMB_MODEL,
         prompt=data.query
     )["embedding"]
 
@@ -279,7 +282,7 @@ def delete_item(data: DeleteData):
 
         for item in metadata:
             emb = ollama.embeddings(
-                model="nomic-embed-text",
+                model=EMB_MODEL,
                 prompt=item["text"]
             )["embedding"]
 
